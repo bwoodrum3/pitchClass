@@ -3,9 +3,16 @@ library(tidyverse)
 library(DBI)
 library(baseballr)
 library(ggplot2)
+library(epanetReader)
+library(RODBC)
+library(rgl)
+library(car)
+library(extrafont) 
+font_import()
+loadfonts(device = "win")
 
 theme_hack3r <- function(){ 
-  font <- "Arial"   #assign font family up front
+  font <- "Franklin Gothic Medium"   #assign font family up front
   
   theme_minimal() %+replace%    #replace elements we want to change
     
@@ -25,12 +32,15 @@ theme_hack3r <- function(){
                                          linetype = 3, 
                                          linewidth = 0.5),
       panel.grid.minor.y = element_blank(),
+      plot.background = element_rect(fill = "gray15"),
       
       
       #since theme_minimal() already strips axis lines, 
       #we don't need to do that again
       
       #text elements
+      text = element_text(color = 'green'),
+      title = element_text(color = 'green'),
       plot.title = element_text(             #title
         family = font,            #set font family
         size = 20,                #set font size
@@ -81,139 +91,134 @@ pitch_colors <- c("4-Seam Fastball" = "red",
                   "Changeup" = "blue",
                   "Split-Finger" = "darkblue",
                   "Knuckleball" = "gray")
+pitch_cols <- c("FF" = "red",
+                  "TS" = "orange",
+                  "SI" = "darkorange",
+                  "FC" = "yellow",
+                  "FA" = "darkred",
+                  "CU" = "purple",
+                  "KC" = "purple",
+                  "SL" = "green",
+                  "ST" = "darkgreen",
+                  "SV" = "green",
+                  "CH" = "blue",
+                  "FS" = "darkblue",
+                  "KN" = "gray")
+pitch_type_macro <- function(x){
+  if_else(x == "FF","FB",
+          if_else(x == "TS","FB",
+                  if_else(x == "SI","FB",
+                          if_else(x == "FC","BB",
+                                  if_else(x == "FA","FB",
+                                          if_else(x == "CU","BB",
+                                                  if_else(x == "KC","BB",
+                                                          if_else(x == "SL","BB",
+                                                                  if_else(x == "ST","BB",
+                                                                          if_else(x == "SV","BB",
+                                                                                  if_else(x == "CH","CH",
+                                                                                          if_else(x == "FS","CH","OT"))))))))))))
+}
+
+ss <- function(x) scale(x,center=min(x)-0.01,scale=diff(range(x))+0.02)
 
 # to use it:
 # ggplot2::scale_color_manual(values = pitch_color)
 
-annual_statcast_query <- function(season) {
-  
-  # create weeks of dates for season from mar - nov
-  # includes spring training + postseason
-  dates <- seq.Date(as.Date(paste0(season, '-03-01')),
-                    as.Date(paste0(season, '-12-01')), by = 'week')
-  
-  date_grid <- tibble(start_date = dates, 
-                      end_date = dates + 6)
-  
-  # create 'safe' version of scrape_statcast_savant in case week doesn't process
-  safe_savant <- safely(scrape_statcast_savant)
-  
-  # loop over each row of date_grid, and collect each week in a df
-  payload <- map(.x = seq_along(date_grid$start_date), 
-                 ~{message(paste0('\nScraping week of ', date_grid$start_date[.x], '...\n'))
-                   
-                   payload <- safe_savant(start_date = date_grid$start_date[.x], 
-                                          end_date = date_grid$end_date[.x], type = 'pitcher')
-                   
-                   return(payload)
-                 })
-  
-  payload_df <- map(payload, 'result')
-  
-  # eliminate results with an empty dataframe
-  number_rows <- map_df(.x = seq_along(payload_df), 
-                        ~{number_rows <- tibble(week = .x, 
-                                                number_rows = length(payload_df[[.x]]$game_date))}) %>%
-    filter(number_rows > 0) %>%
-    pull(week)
-  
-  payload_df_reduced <- payload_df[number_rows]
-  
-  combined <- payload_df_reduced %>%
-    bind_rows()
-  
-  return(combined)
+setwd("C:/Users/Bradley/Documents/GitHub/pitchClass")
+
+##### Initial Data Setup
+# meatball <- odbcConnect("SQLEXPRESS01")
+# dat24 <- sqlQuery(meatball, "
+#           select s.pitcherid
+#           	, s.batterid
+#           	, s.pfx_x*12 [hb]
+#           	, s.pfx_z*12 [ivb]
+#           	, s.arm_angle
+#           	, s.release_spin
+#           	, s.release_spin
+#           	, s.spin_axis
+#           	, s.spin_dir
+#           	, s.release_speed
+#           	, s.woba_value
+#           	, s.woba_denom
+#           	, s.pitch_type
+#           	, s.event_type
+#           	, s.pitch_description
+#           	, s.launch_angle
+#           	, s.launch_speed
+#           	, s.stand
+#           	, s.p_throws
+#           	, case when s.inning_topbot='Bot' then s.home_team else s.vis_team end [pit_team]
+#           	, s.release_extension
+#           	, s.gameid
+#           	, s.game_date
+#           	, s.inning
+#           	, s.pa_number
+#           	, s.n_thruorder_pitcher
+#           from [master].[dbo].[pitStatcast] s
+#           where s.game_type='Regular Season'
+#                   ")
+# close(meatball)
+# write.csv(dat24,"dat24.csv", row.names = FALSE)
+
+##### Successive Data Setup
+if(nrow(dat24)<1000) {
+  dat24 <- read.csv("dat24.csv")
+} else {
+  print("We good.")
 }
+colnames(dat24)[20] <- "ballpark"
+
+qualPitchers <- dat24 %>% group_by(pitcherid) %>% summarise(
+  n = n()
+)
+qualPitchers <- subset(qualPitchers, n > 300)
+
+qualDat24 <- inner_join(dat24,qualPitchers,by = "pitcherid")
+
+ggplot(qualDat24, aes(hb, ivb)) +
+  geom_point(aes(colour = pitch_type)) +
+  facet_grid(cols = vars(p_throws)) +
+  ggplot2::scale_color_manual(values = pitch_cols)
 
 
-format_append_statcast <- function(df) {
-  
-  # function for appending new variables to the data set
-  
-  additional_info <- function(df) {
-    
-    # apply additional coding for custom variables
-    
-    df$hit_type <- with(df, ifelse(type == "X" & events == "single", 1,
-                                   ifelse(type == "X" & events == "double", 2,
-                                          ifelse(type == "X" & events == "triple", 3, 
-                                                 ifelse(type == "X" & events == "home_run", 4, NA)))))
-    
-    df$hit <- with(df, ifelse(type == "X" & events == "single", 1,
-                              ifelse(type == "X" & events == "double", 1,
-                                     ifelse(type == "X" & events == "triple", 1, 
-                                            ifelse(type == "X" & events == "home_run", 1, NA)))))
-    
-    df$fielding_team <- with(df, ifelse(inning_topbot == "Bot", away_team, home_team))
-    
-    df$batting_team <- with(df, ifelse(inning_topbot == "Bot", home_team, away_team))
-    
-    df <- df %>%
-      mutate(barrel = ifelse(launch_angle <= 50 & launch_speed >= 98 & launch_speed * 1.5 - launch_angle >= 117 & launch_speed + launch_angle >= 124, 1, 0))
-    
-    df <- df %>%
-      mutate(spray_angle = round(
-        (atan(
-          (hc_x-125.42)/(198.27-hc_y)
-        )*180/pi*.75)
-        ,1)
-      )
-    
-    df <- df %>%
-      filter(!is.na(game_year))
-    
-    return(df)
-  }
-  
-  df <- df %>%
-    additional_info()
-  
-  df$game_date <- as.character(df$game_date)
-  
-  df <- df %>%
-    arrange(game_date)
-  
-  df <- df %>%
-    filter(!is.na(game_date))
-  
-  df <- df %>%
-    ungroup()
-  
-  df <- df %>%
-    select(setdiff(names(.), c("error")))
-  
-  cols_to_transform <- c("fielder_2", "pitcher_1", "fielder_2_1", "fielder_3",
-                         "fielder_4", "fielder_5", "fielder_6", "fielder_7",
-                         "fielder_8", "fielder_9")
-  
-  df <- df %>%
-    mutate_at(.vars = cols_to_transform, as.numeric) %>%
-    mutate_at(.vars = cols_to_transform, function(x) {
-      ifelse(is.na(x), 999999999, x)
-    })
-  
-  data_base_column_types <- read_csv("https://app.box.com/shared/static/q326nuker938n2nduy81au67s2pf9a3j.csv")
-  
-  character_columns <- data_base_column_types %>%
-    filter(class == "character") %>%
-    pull(variable)
-  
-  numeric_columns <- data_base_column_types %>%
-    filter(class == "numeric") %>%
-    pull(variable)
-  
-  integer_columns <- data_base_column_types %>%
-    filter(class == "integer") %>%
-    pull(variable)
-  
-  df <- df %>%
-    mutate_if(names(df) %in% character_columns, as.character) %>%
-    mutate_if(names(df) %in% numeric_columns, as.numeric) %>%
-    mutate_if(names(df) %in% integer_columns, as.integer)
-  
-  return(df)
-}
 
-stat24 <- annual_statcast_query(2024)
-format_append_statcast(stat24)
+pitcherAvgs <- qualDat24 %>% group_by(pitcherid, pitch_type, p_throws) %>%
+  summarise(
+    hb = mean(hb),
+    ivb = mean(ivb),
+    velo = mean(release_speed),
+    spin = mean(release_spin),
+    nPitches = mean(n)
+  )
+pitcherAvgs$typeMacro <- as.factor(pitch_type_macro(pitcherAvgs$pitch_type))
+pitcherAvgs$hbStand <- with(pitcherAvgs,(if_else(p_throws=='L',-1*hb,hb)))
 
+ggplot(pitcherAvgs, aes(hb, ivb)) +
+  geom_point(aes(colour = pitch_type)) +
+  facet_grid(cols = vars(p_throws)) +
+  ggplot2::scale_color_manual(values = pitch_cols)
+
+ggplot(pitcherAvgs, aes(hbStand, ivb)) +
+  geom_point(aes(colour = pitch_type)) +
+#  facet_grid(cols = vars(p_throws)) +
+  ggplot2::scale_color_manual(values = pitch_cols)
+
+mycolors <- c('darkgreen', 'royalblue1', 'darkred','gray')
+pitcherAvgs$color <- mycolors[ as.numeric(pitcherAvgs$typeMacro) ]
+
+with(subset(pitcherAvgs, typeMacro != 'OT'), 
+     plot3d(
+          x = hbStand, 
+          y = ivb, 
+          z = velo, 
+          col = color,
+#          type = 's',
+#          groups = typeMacro,
+#          surface=FALSE, grid = FALSE, ellipsoid = TRUE,
+          xlab = "Horizotnal Break",
+          ylab = "Vertical Break",
+          zlab = "Velo",
+          bg.col = "black",
+          radius = nPitches)
+)
