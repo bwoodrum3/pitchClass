@@ -1,14 +1,12 @@
-library(dplyr)
 library(tidyverse)
 library(DBI)
 library(baseballr)
-library(ggplot2)
 library(epanetReader)
 library(RODBC)
 library(rgl)
 library(car)
 library(extrafont) 
-font_import()
+# font_import()
 loadfonts(device = "win")
 
 theme_hack3r <- function(){ 
@@ -129,37 +127,45 @@ setwd("C:/Users/Bradley/Documents/GitHub/pitchClass")
 ##### Initial Data Setup
 # meatball <- odbcConnect("SQLEXPRESS01")
 # dat24 <- sqlQuery(meatball, "
-#           select s.pitcherid
-#           	, s.batterid
-#           	, s.pfx_x*12 [hb]
-#           	, s.pfx_z*12 [ivb]
-#           	, s.arm_angle
-#           	, s.release_spin
-#           	, s.release_spin
-#           	, s.spin_axis
-#           	, s.spin_dir
-#           	, s.release_speed
-#           	, s.woba_value
-#           	, s.woba_denom
-#           	, s.pitch_type
-#           	, s.event_type
-#           	, s.pitch_description
-#           	, s.launch_angle
-#           	, s.launch_speed
-#           	, s.stand
-#           	, s.p_throws
-#           	, case when s.inning_topbot='Bot' then s.home_team else s.vis_team end [pit_team]
-#           	, s.release_extension
-#           	, s.gameid
-#           	, s.game_date
-#           	, s.inning
-#           	, s.pa_number
-#           	, s.n_thruorder_pitcher
-#           from [master].[dbo].[pitStatcast] s
-#           where s.game_type='Regular Season'
+# select s.pitcherid
+# 	, concat(p.name_first,' ',p.name_last) [pitcher]
+# 	, s.batterid
+# 	, concat(h.name_first,' ',h.name_last) [batter]
+# 	, s.pfx_x*12 [hb]
+# 	, s.pfx_z*12 [ivb]
+# 	, s.arm_angle
+# 	, s.release_spin
+# 	, s.release_spin
+# 	, s.spin_axis
+# 	, s.spin_dir
+# 	, s.release_speed
+# 	, s.woba_value
+# 	, s.woba_denom
+# 	, s.pitch_type
+# 	, s.event_type
+# 	, s.pitch_description
+# 	, s.launch_angle
+# 	, s.launch_speed
+# 	, s.stand
+# 	, s.p_throws
+# 	, s.home_team [ballpark]
+# 	, case when s.inning_topbot='Bot' then s.home_team else s.vis_team end [pitcherTeam]
+# 	, s.release_extension
+# 	, s.gameid
+# 	, s.game_date
+# 	, s.inning
+# 	, s.pa_number
+# 	, s.n_thruorder_pitcher
+# from [master].[dbo].[pitStatcast] s
+# left join [master].[dbo].[player] p
+# 	on s.pitcherid = p.key_mlbam
+# left join [master].[dbo].[player] h
+# 	on s.batterid = h.key_mlbam
+# where s.game_type='Regular Season'
 #                   ")
 # close(meatball)
 # write.csv(dat24,"dat24.csv", row.names = FALSE)
+
 
 ##### Successive Data Setup
 if(nrow(dat24)<1000) {
@@ -168,30 +174,38 @@ if(nrow(dat24)<1000) {
   print("We good.")
 }
 
+
+##### Column Additions
+dat24$rockies <- as.factor(with(dat24, if_else(ballpark=="COL","COL","Other")))
+dat24$typeMacro <- as.factor(pitch_type_macro(dat24$pitch_type))
+dat24$hbStand <- with(dat24,(if_else(p_throws=='L',-1*hb,hb)))
+dat24$tpyeMacro <- with(dat24,pitch_type_macro(pitch_type))
+
 qualPitchers <- dat24 %>% group_by(pitcherid) %>% summarise(
-  n = n()
+  nPitches = n()
 )
-qualPitchers <- subset(qualPitchers, n > 300)
+qualPitchers <- subset(qualPitchers, nPitches > 300)
 
 qualDat24 <- inner_join(dat24,qualPitchers,by = "pitcherid")
 
+
+##### Data Plotting
 ggplot(qualDat24, aes(hb, ivb)) +
   geom_point(aes(colour = pitch_type)) +
   facet_grid(cols = vars(p_throws)) +
   ggplot2::scale_color_manual(values = pitch_cols)
 
 
-
-pitcherAvgs <- qualDat24 %>% group_by(pitcherid, pitch_type, p_throws) %>%
+# Colorado Rockies Research
+pitcherAvgs <- qualDat24 %>% group_by(pitcherid, pitch_type, p_throws, rockies, typeMacro) %>%
   summarise(
     hb = mean(hb),
+    hbStand = mean(hbStand),
     ivb = mean(ivb),
     velo = mean(release_speed),
     spin = mean(release_spin),
-    nPitches = mean(n)
+    nPitches = mean(nPitches)
   )
-pitcherAvgs$typeMacro <- as.factor(pitch_type_macro(pitcherAvgs$pitch_type))
-pitcherAvgs$hbStand <- with(pitcherAvgs,(if_else(p_throws=='L',-1*hb,hb)))
 
 ggplot(pitcherAvgs, aes(hb, ivb)) +
   geom_point(aes(colour = pitch_type)) +
@@ -221,3 +235,43 @@ with(subset(pitcherAvgs, typeMacro != 'OT'),
           bg.col = "black",
           radius = nPitches)
 )
+# bg3d(color = "black") 
+
+
+ggplot(pitcherAvgs, aes(hbStand, ivb)) +
+  geom_point(aes(color = velo)) +
+  facet_grid(cols = vars(rockies)) +
+  scale_color_gradient2(low = 'royalblue', 
+                        mid='lightblue', 
+                        high = 'red', 
+                        midpoint = 85,
+                        limits = c(70,100))
+
+
+thinAirPitchers <- qualDat24 %>% 
+  group_by(pitcherid, pitch_type, rockies) %>% 
+  summarise(nPitches = n())
+thinAirPitchers <- thinAirPitchers %>% pivot_wider(names_from = rockies, values_from = nPitches)
+thinAirPitchers <- subset(thinAirPitchers, Other >= 20 & COL >= 20)
+thinIDs <- unique(thinAirPitchers$pitcherid)
+
+thinAirDat <- filter(dat24,pitcherid %in% thinIDs)
+
+ggplot(thinAirDat, aes(hbStand, ivb)) +
+  geom_point(aes(color = release_speed)) +
+  facet_grid(cols = vars(rockies)) +
+  scale_color_gradient2(low = 'royalblue', 
+                        mid='lightblue', 
+                        high = 'red', 
+                        midpoint = 85,
+                        limits = c(70,100))
+
+thinAvg <- thinAirDat %>% group_by(pitcherid, pitcher, pitch_type, p_throws, rockies) %>%
+  summarise(
+    hb = mean(hb),
+    ivb = mean(ivb),
+    velo = mean(release_speed),
+    spin = mean(release_spin),
+    nPitches = n()
+  )
+write.csv(thinAvg,"thinAvg.csv", row.names = FALSE)

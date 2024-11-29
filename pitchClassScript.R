@@ -129,34 +129,40 @@ setwd("C:/Users/Bradley/Documents/GitHub/pitchClass")
 ##### Initial Data Setup
 # meatball <- odbcConnect("SQLEXPRESS01")
 # dat24 <- sqlQuery(meatball, "
-#           select s.pitcherid
-#           	, s.batterid
-#           	, s.pfx_x*12 [hb]
-#           	, s.pfx_z*12 [ivb]
-#           	, s.arm_angle
-#           	, s.release_spin
-#           	, s.release_spin
-#           	, s.spin_axis
-#           	, s.spin_dir
-#           	, s.release_speed
-#           	, s.woba_value
-#           	, s.woba_denom
-#           	, s.pitch_type
-#           	, s.event_type
-#           	, s.pitch_description
-#           	, s.launch_angle
-#           	, s.launch_speed
-#           	, s.stand
-#           	, s.p_throws
-#           	, case when s.inning_topbot='Bot' then s.home_team else s.vis_team end [pit_team]
-#           	, s.release_extension
-#           	, s.gameid
-#           	, s.game_date
-#           	, s.inning
-#           	, s.pa_number
-#           	, s.n_thruorder_pitcher
-#           from [master].[dbo].[pitStatcast] s
-#           where s.game_type='Regular Season'
+# select s.pitcherid
+# 	, concat(p.name_first,' ',p.name_last) [pitcher]
+# 	, s.batterid
+# 	, concat(h.name_first,' ',h.name_last) [batter]
+# 	, s.pfx_x*12 [hb]
+# 	, s.pfx_z*12 [ivb]
+# 	, s.arm_angle
+# 	, s.release_spin
+# 	, s.release_spin
+# 	, s.spin_axis
+# 	, s.spin_dir
+# 	, s.release_speed
+# 	, s.woba_value
+# 	, s.woba_denom
+# 	, s.pitch_type
+# 	, s.event_type
+# 	, s.pitch_description
+# 	, s.launch_angle
+# 	, s.launch_speed
+# 	, s.stand
+# 	, s.p_throws
+# 	, case when s.inning_topbot='Bot' then s.home_team else s.vis_team end [ballpark]
+# 	, s.release_extension
+# 	, s.gameid
+# 	, s.game_date
+# 	, s.inning
+# 	, s.pa_number
+# 	, s.n_thruorder_pitcher
+# from [master].[dbo].[pitStatcast] s
+# left join [master].[dbo].[player] p
+# 	on s.pitcherid = p.key_mlbam
+# left join [master].[dbo].[player] h
+# 	on s.batterid = h.key_mlbam
+# where s.game_type='Regular Season'
 #                   ")
 # close(meatball)
 # write.csv(dat24,"dat24.csv", row.names = FALSE)
@@ -167,7 +173,6 @@ if(nrow(dat24)<1000) {
 } else {
   print("We good.")
 }
-colnames(dat24)[20] <- "ballpark"
 
 qualPitchers <- dat24 %>% group_by(pitcherid) %>% summarise(
   n = n()
